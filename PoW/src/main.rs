@@ -1,85 +1,125 @@
-use chrono::{Utc, TimeZone};
-use sha2::{Sha256, Digest}; // sha2 crate'ini içe aktarıyoruz
-use std::collections::VecDeque;
-use std::fmt;
+use chrono::{Utc};
+use rand::Rng;
+use sha2::{Sha256, Digest}; // sha2 crate'i içe aktarıyoruz
+use std::collections::{HashMap, VecDeque};
+use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::Duration;
 
 #[derive(Debug, Clone)]
-pub struct Block {
-    pub index: u32,
-    pub previous_hash: String,
-    pub timestamp: String,
-    pub transactions: Vec<String>,  // Basitlik açısından işlemler bir liste olarak tutuluyor
-    pub nonce: u32,
-    pub hash: String,
+struct Block {
+    id: u64,
+    timestamp: String,
+    previous_hash: String,
+    transactions: Vec<String>,
+    nonce: u64,
+    hash: String,
+    validator: String,
+    difficulty: usize,
 }
 
 impl Block {
-    fn new(index: u32, previous_hash: String, transactions: Vec<String>) -> Self {
+    fn new(id: u64, previous_hash: String, transactions: Vec<String>, validator: String, difficulty: usize) -> Self {
         let timestamp = Utc::now().to_rfc3339();
         Block {
-            index,
-            previous_hash,
+            id,
             timestamp,
+            previous_hash,
             transactions,
             nonce: 0,
-            hash: String::new(), // Hash başlangıçta boş
+            hash: String::new(),
+            validator,
+            difficulty,
         }
     }
 
-    // Blok hash'ini hesaplayacak fonksiyon
     fn calculate_hash(&self) -> String {
         let data = format!(
-            "{}{}{}{}{}",
-            self.index, self.previous_hash, self.timestamp, self.nonce, self.transactions.join("")
+            "{}{}{}{}{}{}",
+            self.id, self.timestamp, self.previous_hash, self.nonce, self.validator, self.transactions.join("")
         );
         let mut hasher = Sha256::new();
         hasher.update(data);
         format!("{:x}", hasher.finalize())
     }
 
-    // Proof of Work algoritmasını uygulayarak uygun nonce'u bulacak fonksiyon
-    pub fn mine_block(&mut self, difficulty: usize) {
-        self.hash = self.calculate_hash(); // İlk olarak hash'i hesapla
-
-        let target = "0".repeat(difficulty);  // Belirli bir zorluk seviyesini hedefliyoruz
-        while &self.hash[..difficulty] != target {
+    fn mine_block(&mut self) {
+        let target = vec!['0'; self.difficulty].iter().collect::<String>();
+        
+        while &self.calculate_hash()[..self.difficulty] != target {
             self.nonce += 1;
-            self.hash = self.calculate_hash(); // Yeni nonce değeri ile hash hesapla
+            self.hash = self.calculate_hash();
         }
-        println!("Block mined: {} with nonce: {}", self.hash, self.nonce);
+    }
+
+    fn finalize_block(&mut self) {
+        self.hash = self.calculate_hash();
     }
 }
 
-// Blockchain yapısı
-pub struct Blockchain {
-    pub chain: VecDeque<Block>,
-    pub difficulty: usize,
+#[derive(Debug, Clone)]
+struct Node {
+    name: String,
+    stake: u64,
+}
+
+impl Node {
+    fn new(name: &str, stake: u64) -> Self {
+        Node {
+            name: name.to_string(),
+            stake,
+        }
+    }
+}
+
+struct Blockchain {
+    chain: VecDeque<Block>,
+    pending_transactions: Vec<String>,
+    nodes: HashMap<String, u64>,
+    difficulty: usize, 
 }
 
 impl Blockchain {
-    pub fn new(difficulty: usize) -> Self {
+    fn new(difficulty: usize) -> Self {
         let mut blockchain = Blockchain {
             chain: VecDeque::new(),
+            pending_transactions: vec![],
+            nodes: HashMap::new(),
             difficulty,
         };
-        
-        // Genesis bloğu (ilk blok) ekliyoruz
-        let genesis_block = Block::new(0, String::from("0"), vec!["Genesis Block".into()]);
-        blockchain.chain.push_back(genesis_block);
-        
+        let genesis_block = Block::new(0, String::from("0"), vec!["Genesis Block".to_string()], "System".to_string(), difficulty);
+        blockchain.add_block_to_chain(genesis_block);
         blockchain
     }
 
-    // Yeni blok eklemek
-    pub fn add_block(&mut self, transactions: Vec<String>) {
-        let last_block = self.chain.back().unwrap();
-        let mut new_block = Block::new(last_block.index + 1, last_block.hash.clone(), transactions);
-        new_block.mine_block(self.difficulty); // Blok madenleme işlemi
-        self.chain.push_back(new_block);
+    fn add_transaction(&mut self, transaction: String) {
+        self.pending_transactions.push(transaction);
     }
 
-    // Zinciri yazdırmak
-    pub fn print_chain(&self) {
+    fn register_node(&mut self, node: Node) {
+        self.nodes.insert(node.name.clone(), node.stake);
+    }
+
+    fn finalize_pending_transactions(&mut self) {
+        let last_block = self.chain.back().expect("Blockchain is empty; no last block found.");
+        let mut new_block = Block::new(
+            last_block.id + 1,
+            last_block.hash.clone(),
+            self.pending_transactions.clone(),
+            "Validator".to_string(),
+            self.difficulty,
+        );
+        new_block.mine_block();
+        new_block.finalize_block();
+        self.add_block_to_chain(new_block);
+        self.pending_transactions.clear();
+    }
+
+    fn add_block_to_chain(&mut self, block: Block) {
+        self.chain.push_back(block);
+    }
+
+    fn print_chain(&self) {
         for block in &self.chain {
             println!("{:?}", block);
         }
@@ -87,14 +127,43 @@ impl Blockchain {
 }
 
 fn main() {
-    let mut blockchain = Blockchain::new(4);
-    println!("Blockchain created with difficulty : 4");
+    let blockchain = Arc::new(Mutex::new(Blockchain::new(3)));
 
-    blockchain.add_block(vec!["Transaction 1".into()]);
-    blockchain.add_block(vec!["Transaction 2".into()]);
-    blockchain.add_block(vec!["Transaction 3".into(),"Transaction 4".into()]);
+    let nodes = vec![
+        Node::new("Alice", 50),
+        Node::new("Bob", 30),
+        Node::new("Charlie", 20),
+    ];
 
+    for node in &nodes {
+        blockchain.lock().expect("Failed to acquire lock on blockchain.").register_node(node.clone());
+    }
 
-    blockchain.print_chain();
+    let blockchain_clone = Arc::clone(&blockchain);
+    let validator_thread = thread::spawn(move || {
+        loop {
+            thread::sleep(Duration::from_secs(5));
+            if let Ok(mut blockchain) = blockchain_clone.lock() {
+                blockchain.finalize_pending_transactions();
+            } else {
+                println!("Failed to acquire lock for validator thread.");
+            }
+        }
+    });
+
+    {
+        let mut blockchain = blockchain.lock().expect("Failed to acquire lock on blockchain for transactions.");
+        blockchain.add_transaction("Alice -> Bob: 10 coins".to_string());
+        blockchain.add_transaction("Bob -> Charlie: 5 coins".to_string());
+        blockchain.add_transaction("Charlie -> Alice: 15 coins".to_string());
+    }
+
+    thread::sleep(Duration::from_secs(15));
+
+    {
+        let blockchain = blockchain.lock().expect("Failed to acquire lock on blockchain for printing.");
+        blockchain.print_chain();
+    }
+
+    validator_thread.join().expect("Validator thread panicked.");
 }
-
