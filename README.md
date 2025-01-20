@@ -12,6 +12,7 @@ Blockchain consensus algorithms are the backbone of decentralized systems, ensur
 - **Proof of Stake (PoS)**: A resource-efficient alternative that selects validators based on stake.
 - **Delegated Proof of Stake (DPoS)**: A scalable consensus mechanism where stakeholders vote for trusted delegates.
 - **Practical Byzantine Fault Tolerance (PBFT)**: A protocol ensuring security against Byzantine faults in blockchain networks.
+- **Proof of Authority (PoA)**: A consensus mechanism relying on trusted validators, suitable for private or consortium blockchains.
 
 ## Why Rust?
 
@@ -36,6 +37,9 @@ These features align with the requirements of blockchain development, where secu
 │   ├── src
 │   ├── tests
 ├── pbft
+│   ├── src
+│   ├── tests
+├── poa
 │   ├── src
 │   ├── tests
 ├── README.md
@@ -77,6 +81,3 @@ Through this project, I:
 ## Contributing
 
 Contributions are welcome! If you'd like to enhance or expand this project, feel free to open an issue or submit a pull request.
-
-
----
